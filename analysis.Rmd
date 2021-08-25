@@ -1,0 +1,238 @@
+---
+title: "Data Analyst Skills Test (Health Manager Level 2)"
+author: "Phillip Hungerford"
+date: "24/08/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr) # for filtering and data manipulation
+library(ggplot2) # for data visualisation
+library(survival) # for survival analysis
+```
+
+# 1. Analysing Data
+
+Please prepare code in R preferably to answer the following questions:
+
+You will need to source data files (sim_av_patient.csv, sim_av_tumour.csv and other metadata files) from the UK synthetic cancer registry data (Simulacrum*) from (https://healthdatainsight.org.uk/project/the-simulacrum/).
+
+a. What is the sex distribution of patients?
+b. Prepare a dataset with all lung cancer patients (SITE_ICD10_O2_3CHAR= C34) and their cause of deaths.
+c. Calculate the mean survival time in days for the lung cancer patients who were diagnosed in 2013.
+
+
+## Dataset details
+The Simulacrum is a dataset that contains artificial patient-like cancer data to help researchers gain insights.
+
+
+```{r data}
+# load patient level data with death information
+sim_av_patient <- read.csv("simulacrum_release_v1.2.0.2017/data/sim_av_patient.csv", na.strings = c(""))
+
+# load tumour level data with patient ID
+sim_av_tumour <- read.csv("simulacrum_release_v1.2.0.2017/data/sim_av_tumour.csv")
+
+# inspect 
+head(sim_av_patient)
+head(sim_av_tumour)
+
+# check columns match with data dictionary? Yes
+```
+We can prepare the data by utilising the data dictionary and metadata files given. 
+```{r mapvalues}
+
+#-----------------------------------------------------------------------------
+# clean vital status
+zvitalstatus_lookup <- read.csv('simulacrum_release_v1.2.0.2017/data_dictionary_files/zvitalstatus_lookup.csv')
+
+for (i in 1:nrow(zvitalstatus_lookup)){
+  sim_av_patient$NEWVITALSTATUS[sim_av_patient$NEWVITALSTATUS == zvitalstatus_lookup$ZVITALSTATUSID[i]] <- zvitalstatus_lookup$SHORTDESC[i]
+}
+
+table(sim_av_patient$NEWVITALSTATUS)
+#-----------------------------------------------------------------------------
+
+# clean age
+zsex_lookup <- read.csv('simulacrum_release_v1.2.0.2017/data_dictionary_files/zsex_lookup.csv')
+
+for (i in 1:nrow(zsex_lookup)){
+  sim_av_patient$SEX[sim_av_patient$SEX == zsex_lookup$ZSEXID[i]] <- zsex_lookup$SHORTDESC[i]
+}
+
+#-----------------------------------------------------------------------------
+# clean ethnicity
+
+zethnicity_lookup <- read.csv('simulacrum_release_v1.2.0.2017/data_dictionary_files/zethnicity_lookup.csv')
+
+for (i in 1:nrow(zethnicity_lookup)){
+  sim_av_patient$ETHNICITY[sim_av_patient$ETHNICITY == zethnicity_lookup$ZETHNICITYID[i]] <- zethnicity_lookup$SHORTDESC[i]
+}
+
+#-----------------------------------------------------------------------------
+# make factors based on type
+sim_av_patient <- sim_av_patient %>% mutate_at(c('SEX',
+                                                 'ETHNICITY',
+                                                 'NEWVITALSTATUS'), as.factor)
+# Date
+sim_av_patient %>% 
+  mutate(
+    VITALSTATUSDATE  = as.Date(VITALSTATUSDATE , format = "%Y-%m-%d")
+  )
+
+sim_av_tumour %>% 
+  mutate(
+    DIAGNOSISDATEBEST  = as.Date(DIAGNOSISDATEBEST , format = "%Y-%m-%d")
+  )
+
+#Check
+str(sim_av_patient)
+str(sim_av_tumour)
+```
+ 
+## a. What is the sex distribution of patients?
+```{r 1a}
+# 1.a. Sex distribution
+sim_av_patient %>%
+  count(SEX) %>%
+  # count creates a column called 'n'
+  mutate(percent = n / sum(n) * 100)
+
+```
+
+## b. Prepare a dataset with all lung cancer patients (SITE_ICD10_O2_3CHAR= C34) and their cause of deaths.
+
+To prepare the data for survival analysis we need to define the components of the data we need. 
+
+For subject i:
+1. Event time Ti
+2. Censoring time Ci
+3. Event indicator δi:
+  - 1 if event observed (i.e. Ti≤Ci)
+  - 0 if censored (i.e. Ti>Ci)
+4. Observed time Yi=min(Ti,Ci)
+
+The observed times and an event indicator are provided in the lung data
+
+time: Survival time in days (Yi)
+status: censoring status 0=censored, 1=dead (δi)
+
+```{r 1b}
+# 1.b. Prepare data
+# get earliest diagnosis date for each patient
+first_diagnosis <- sim_av_tumour %>% 
+  select(PATIENTID, DIAGNOSISDATEBEST) %>% 
+  group_by(PATIENTID) %>%
+  filter(DIAGNOSISDATEBEST == min(DIAGNOSISDATEBEST)) %>%
+  distinct()
+
+# merge patient diagnosis data to patient level data by patient id
+analysis_data <- left_join(sim_av_patient, first_diagnosis,by="PATIENTID")
+
+# format dates and calculate time from diagnosis to event
+analysis_data <- analysis_data %>% mutate(
+  DIAGNOSISDATEBEST = as.Date(DIAGNOSISDATEBEST, format = "%Y-%m-%d"),
+  VITALSTATUSDATE = as.Date(VITALSTATUSDATE, format = "%Y-%m-%d"),
+  time = as.numeric(difftime(VITALSTATUSDATE, DIAGNOSISDATEBEST, units = "days")),
+  status = ifelse(NEWVITALSTATUS == "Dead",1,0)
+)
+
+# Extract lung cancer patients
+target <- "C34"
+
+# find patients with target from tumour data
+lung_cancer_tumours <- sim_av_tumour %>% filter(SITE_ICD10_O2_3CHAR == target)
+
+# extract these patients (There are 167233 patients that have lung cancer)
+lung_cancer_patients <- analysis_data[analysis_data$PATIENTID %in% unique(lung_cancer_tumours$PATIENTID), ]
+
+# check missing for key variables
+na_count <-sapply(lung_cancer_patients, function(y) sum(length(which(is.na(y)))))
+na_count <- data.frame(na_count)
+print(na_count)
+
+# No missing data for time, or death information, good!
+```
+
+## c. Calculate the mean survival time in days for the lung cancer patients who were diagnosed in 2013.
+```{r 1c}
+# 1.c. Survival
+# filter patients that were diagnosed in 2013 only as per condition.
+lung_cancer_patients_2013 <- lung_cancer_patients %>% filter(DIAGNOSISDATEBEST >= "2013-01-01" & DIAGNOSISDATEBEST <= "2013-12-31") # N = 37081
+
+table(lung_cancer_patients_2013$NEWVITALSTATUS)
+# Alive = 9358        
+# Died = 27707
+# Exit posting = 16
+
+# Survival from diagnosis -> death
+
+# Kaplan-Meier estimate can be obtained as numbers by using survfit 
+om.fit <- survfit(Surv(time, status) ~ 1, data = lung_cancer_patients_2013) 
+summary(om.fit)
+
+## Report how many deaths were there during the follow-up and what was the median follow-up time until death.
+# get the mean and median survival times
+#print(om.fit, print.rmean = TRUE) #1976
+
+# plotting Nelson-Aalen estimate
+om.fit <- survfit( Surv(time, status) ~ 1, data = lung_cancer_patients_2013) 
+summary(om.fit)
+plot(om.fit, fun="cumhaz", main = "Nelson-Aalen estimate of cumulative hazard function")
+
+
+# Plot the Kaplan-Meier survival curves by all categorical variables in the data.
+om.fit3 <- survfit(Surv(time, status) ~ SEX, data = lung_cancer_patients_2013) 
+
+# plotting Kaplan-Meier estimate
+plot(om.fit3, col=c('blue', 'red', 'green'), main = 'Kaplan-Meier estimate for Sex')
+
+# Carry out the log-rank tests for differences in survival experience by the categorical variables and interpret the results.
+# 2-sample log-rank test
+om.fit2b <- coxph( Surv(time, status) ~ SEX, data = lung_cancer_patients_2013) 
+summary(om.fit2b)
+
+# fitting a simple Cox model for sex
+cox.rx <- coxph( Surv(time, status) ~ SEX, data = lung_cancer_patients_2013) 
+summary(cox.rx) #sig p=0.003
+
+```
+
+# 2. Visualising Data
+Using the UK synthetic cancer registry data (Simulacrum):
+
+a. Visualise the proportion of all ethnic groups among non-British male patients. You can find ethnic information of patients in the data dictionary provided in the simulacrum dataset.
+
+b. Explore the data to find an interesting or insightful aspect that you can then communicate visually. Be creative!
+
+## a. Visualise the proportion of all ethnic groups among non-British male patients. You can find ethnic information of patients in the data dictionary provided in the simulacrum dataset.
+
+
+```{r 2a}
+# 2.a. Visualise
+
+exclusions <- c("WHITE BRITISH", "X NOT KNOWN", "NOT STATED")
+
+# we create a not in for our exclusions filter
+`%notin%` <- Negate(`%in%`)
+
+# subset data
+non_british_males <- analysis_data %>% filter(SEX == 'MALE' & ETHNICITY %notin% exclusions)
+
+# check distribution of ethnicities
+table(non_british_males$ETHNICITY)
+
+# bar chart
+ggplot(data = non_british_males, aes(x = ETHNICITY)) + 
+  geom_bar()
+```
+
+## b. Explore the data to find an interesting or insightful aspect that you can then communicate visually. Be creative!
+```{r 2b}
+# 2.b. Explore
+
+```
+
+
+_Data used artificial data from the Simulacrum, a synthetic dataset developed by Health Data Insight CiC derived from anonymous cancer data provided by the National Cancer Registration and Analysis Service, which is part of Public Health England_

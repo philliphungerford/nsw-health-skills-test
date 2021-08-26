@@ -26,7 +26,7 @@ c. Calculate the mean survival time in days for the lung cancer patients who wer
 ## Dataset details
 The Simulacrum is a dataset that contains artificial patient-like cancer data to help researchers gain insights.
 
-
+First we download the data and check it against the data dictionary. 
 ```{r data}
 # load patient level data with death information
 sim_av_patient <- read.csv("simulacrum_release_v1.2.0.2017/data/sim_av_patient.csv", na.strings = c(""))
@@ -40,9 +40,27 @@ head(sim_av_tumour)
 
 # check columns match with data dictionary? Yes
 ```
-We can prepare the data by utilising the data dictionary and metadata files given. 
-```{r mapvalues}
 
+Quickly check for missing values
+```{r}
+# check missing for key variables
+na_count <-sapply(sim_av_patient, function(y) sum(length(which(is.na(y)))))
+na_count <- data.frame(na_count)
+print(na_count)
+
+
+# check missing for key variables
+na_count <-sapply(sim_av_tumour, function(y) sum(length(which(is.na(y)))))
+na_count <- data.frame(na_count)
+print(na_count)
+```
+For patient level data there is missing data for ethnicity, death causes (understandable for those that have not died) and 3 for new vital status and vital status dates. 
+
+For tumour level data there is some missing data for stage best system, scores and gleason variables
+
+We can also map values from the zlookup tables to our columns, which will make examining the data easier. 
+```{r mapvalues}
+# Map values
 #-----------------------------------------------------------------------------
 # clean vital status
 zvitalstatus_lookup <- read.csv('simulacrum_release_v1.2.0.2017/data_dictionary_files/zvitalstatus_lookup.csv')
@@ -71,11 +89,13 @@ for (i in 1:nrow(zethnicity_lookup)){
 }
 
 #-----------------------------------------------------------------------------
+# Format columns to appropriate type
+
 # make factors based on type
 sim_av_patient <- sim_av_patient %>% mutate_at(c('SEX',
                                                  'ETHNICITY',
                                                  'NEWVITALSTATUS'), as.factor)
-# Date
+# Dates
 sim_av_patient %>% 
   mutate(
     VITALSTATUSDATE  = as.Date(VITALSTATUSDATE , format = "%Y-%m-%d")
@@ -86,26 +106,91 @@ sim_av_tumour %>%
     DIAGNOSISDATEBEST  = as.Date(DIAGNOSISDATEBEST , format = "%Y-%m-%d")
   )
 
+#-----------------------------------------------------------------------------
 #Check
 str(sim_av_patient)
 str(sim_av_tumour)
 ```
  
+```{r}
+ # library
+library(ggplot2)
+ 
+# create a dataset
+specie <- c(rep("sorgho" , 3) )
+condition <- rep(c("normal" , "stress" , "Nitrogen") , 4)
+value <- abs(rnorm(12 , 0 , 15))
+data <- data.frame(specie,condition,value)
+
+head(data)
+# Stacked
+ggplot(data, aes(fill=condition, y=value, x=specie)) + 
+    geom_bar(position="stack", stat="identity")
+```
+ 
 ## a. What is the sex distribution of patients?
 ```{r 1a}
 # 1.a. Sex distribution
-sim_av_patient %>%
+sex_dist <- sim_av_patient %>%
   count(SEX) %>%
   # count creates a column called 'n'
-  mutate(percent = n / sum(n) * 100)
+  mutate(Percent = round(n / sum(n) * 100,2),
+         Patients = "All")
 
+# show results
+sex_dist
+# we can also visualise this in a stacked bar chart
+
+# 1.a. Sex distribution
+sex_dist$label = paste0(sprintf("%.0f", sex_dist$Percent), "%")
+
+# stacked bar    
+ggplot(sex_dist, aes(x = Patients, y = Percent, fill = SEX)) + 
+  geom_bar(position = "stack", stat='identity') + 
+  geom_text(aes(label = label), position = position_stack(vjust = 0.5), size = 4) +
+  labs(x = "",
+       y = "Percent (%)",
+      title="Sex Distribution of All Patients")
+
+# could also visualise using a pie chart
+ggplot(sex_dist, aes(x = Patients, y = Percent, fill = SEX)) + 
+  geom_bar(width = 1, stat = "identity") +
+  coord_polar("y", start=0) +
+  geom_text(aes(label = label), position = position_stack(vjust = 0.5), size = 4) +
+  labs(x = "",
+       y = "Percent (%)",
+      title="Sex Distribution of All Patients")
 ```
+We can see that the distribution of sex for this dataset is mostly even with 2 patients that have not specified. 
 
 ## b. Prepare a dataset with all lung cancer patients (SITE_ICD10_O2_3CHAR= C34) and their cause of deaths.
 
-To prepare the data for survival analysis we need to define the components of the data we need. 
+This section requires a patient level dataset of those that have had lung cancer. Steps:
+1. Find those that have had tumours relating to lung cancer
+2. Extract patients in the patient level data that correspond to 1.
 
-For subject i:
+```{r}
+#===============================================================================
+# 1. Find those that have had tumours relating to lung cancer
+
+# define our target ICD10 code for lung cancer (C34: Malignant neoplasm of bronchus and lung)
+target <- "C34"
+
+# Extract the IDs for patients with lung cancer tumours (There are 167233 patients that have lung cancer)
+lung_cancer_patient_ids <- unique(sim_av_tumour$PATIENTID[sim_av_tumour$SITE_ICD10_O2_3CHAR == target])
+
+#===============================================================================
+# 2. Extract patients in the patient level data that correspond to 1.
+lung_cancer_patients <- sim_av_patient[sim_av_patient$PATIENTID %in% lung_cancer_patient_ids,]
+
+# check
+head(lung_cancer_patients)
+```
+We now have all lung cancer patients with their id, sex, link number, ethnicity, cause of death, vital status and vital status date. 
+
+## c. Calculate the mean survival time in days for the lung cancer patients who were diagnosed in 2013.
+
+In order to do survival analysis, we also need to prepare the data a bit further. Key components for survival analysis are (for each subject i): 
 1. Event time Ti
 2. Censoring time Ci
 3. Event indicator δi:
@@ -118,59 +203,104 @@ The observed times and an event indicator are provided in the lung data
 time: Survival time in days (Yi)
 status: censoring status 0=censored, 1=dead (δi)
 
-```{r 1b}
-# 1.b. Prepare data
-# get earliest diagnosis date for each patient
-first_diagnosis <- sim_av_tumour %>% 
+Here we will be modeling survival for those that were diagnosed with lung cancer tumours from 2013. We need to therefore:
+1. Find the first diagnosis date for lung cancer patients
+1. Create status variable from NEWVITALSTATUS as Dead; 1 or censored; 0.
+2. Create a time variable that shows the time from diagnosis until status. 
+
+```{r}
+# 1. Find the first diagnosis date for lung cancer patients
+
+# get lung cancer tumours
+lung_cancer_tumours <- sim_av_tumour[sim_av_tumour$SITE_ICD10_O2_3CHAR == target, ] # 169,118 rows
+  
+# from this tumour data, get the earliest date of diagnosis for each patient
+first_diagnosis <- lung_cancer_tumours %>% 
   select(PATIENTID, DIAGNOSISDATEBEST) %>% 
   group_by(PATIENTID) %>%
   filter(DIAGNOSISDATEBEST == min(DIAGNOSISDATEBEST)) %>%
   distinct()
 
-# merge patient diagnosis data to patient level data by patient id
-analysis_data <- left_join(sim_av_patient, first_diagnosis,by="PATIENTID")
+# check 
+head(first_diagnosis) # 167333 rows, matches patient numbers. 
 
+# merge patient diagnosis data to patient level data by patient id
+lung_cancer_patients <- left_join(lung_cancer_patients, first_diagnosis,by="PATIENTID")
+
+# check
+head(lung_cancer_patients)
+```
+We now create our time variable for survival analysis. This will show in days, the time from first lung cancer diagnosis to status date. We will also create our status variable that flags those that have died as 1 and those that are still alive as 0, as they are right censored.
+
+```{r}
 # format dates and calculate time from diagnosis to event
-analysis_data <- analysis_data %>% mutate(
+lung_cancer_patients <- lung_cancer_patients %>% mutate(
   DIAGNOSISDATEBEST = as.Date(DIAGNOSISDATEBEST, format = "%Y-%m-%d"),
   VITALSTATUSDATE = as.Date(VITALSTATUSDATE, format = "%Y-%m-%d"),
   time = as.numeric(difftime(VITALSTATUSDATE, DIAGNOSISDATEBEST, units = "days")),
   status = ifelse(NEWVITALSTATUS == "Dead",1,0)
 )
 
-# Extract lung cancer patients
-target <- "C34"
-
-# find patients with target from tumour data
-lung_cancer_tumours <- sim_av_tumour %>% filter(SITE_ICD10_O2_3CHAR == target)
-
-# extract these patients (There are 167233 patients that have lung cancer)
-lung_cancer_patients <- analysis_data[analysis_data$PATIENTID %in% unique(lung_cancer_tumours$PATIENTID), ]
-
-# check missing for key variables
-na_count <-sapply(lung_cancer_patients, function(y) sum(length(which(is.na(y)))))
-na_count <- data.frame(na_count)
-print(na_count)
-
-# No missing data for time, or death information, good!
+# check
+head(lung_cancer_patients)
 ```
-
-## c. Calculate the mean survival time in days for the lung cancer patients who were diagnosed in 2013.
-```{r 1c}
-# 1.c. Survival
+Everything looks great! Now lets subset patients that were diagnosed in 2013. 
+```{r}
 # filter patients that were diagnosed in 2013 only as per condition.
-lung_cancer_patients_2013 <- lung_cancer_patients %>% filter(DIAGNOSISDATEBEST >= "2013-01-01" & DIAGNOSISDATEBEST <= "2013-12-31") # N = 37081
+lung_cancer_patients_2013 <- lung_cancer_patients %>% filter(DIAGNOSISDATEBEST >= "2013-01-01" & DIAGNOSISDATEBEST <= "2013-12-31") # N = 35210
 
+# See how many have died 
 table(lung_cancer_patients_2013$NEWVITALSTATUS)
-# Alive = 9358        
-# Died = 27707
-# Exit posting = 16
+# Alive = 7792     
+# Died = 27403
+# Exit posting = 15
 
+# Examine vital status. 
+lung_cancer_deaths <- lung_cancer_patients_2013 %>%
+  count(NEWVITALSTATUS) %>%
+  # count creates a column called 'n'
+  mutate(Percent = round(n / sum(n) * 100,2),
+         Patients = "All")
+# preview
+lung_cancer_deaths
+
+# add label for plot
+lung_cancer_deaths$label = paste0(sprintf("%.0f", lung_cancer_deaths$Percent), "%")
+
+# create stacked bar chart
+ggplot(lung_cancer_deaths, aes(x = Patients, y = Percent, fill = NEWVITALSTATUS)) + 
+  geom_bar(position = "stack", stat='identity') + 
+  geom_text(aes(label = label), position = position_stack(vjust = 0.5), size = 4) +
+  labs(x = "",
+       y = "Percent (%)",
+      title="Sex Distribution of All Patients")
+
+```
+We can see that 78% of patients that were diagnosed with lung cancer have died, with 22% alive or exit posting. 
+
+Model survival.
+
+First we will calculate the survival probability for lung cancer patients. This shows the probability that a patient survives from the time origin (lung cancer diagnosis) to the specified future time. 
+
+```{r}
 # Survival from diagnosis -> death
 
 # Kaplan-Meier estimate can be obtained as numbers by using survfit 
 om.fit <- survfit(Surv(time, status) ~ 1, data = lung_cancer_patients_2013) 
-summary(om.fit)
+
+plot(survfit(Surv(time, status) ~ 1, data = lung_cancer_patients_2013), 
+     xlab = "Days", 
+     ylab = "Overall survival probability")
+
+# calculate mean, median survival time
+print(om.fit, print.rmean=TRUE)
+```
+
+Second we can also calculate the hazard, which shows the probability that an individual who is under observation at time t, has an event at that time. 
+```{r 1c}
+
+
+
 
 ## Report how many deaths were there during the follow-up and what was the median follow-up time until death.
 # get the mean and median survival times

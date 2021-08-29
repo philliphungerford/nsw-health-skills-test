@@ -33,8 +33,9 @@ First we download the data and check it against the data dictionary. The Cancer 
 
 ["Figure 1. - Data linkage information"](images/simulacrum-schema.png)
 
-Based on this information, we download the data and check it against the data dictionary. 
-```{r data}
+Based on this information, we will download the data and check it against the data dictionary. 
+
+```{r}
 ##############################################################################
 # Prepare data
 #=============================================================================
@@ -52,6 +53,7 @@ head(sim_av_tumour)
 ```
 
 Quickly check for missing values
+
 ```{r}
 # check missing for key variables
 na_count <-sapply(sim_av_patient, function(y) sum(length(which(is.na(y)))))
@@ -64,13 +66,14 @@ na_count <-sapply(sim_av_tumour, function(y) sum(length(which(is.na(y)))))
 na_count <- data.frame(na_count)
 print(na_count)
 ```
+
 For patient level data there is missing data for ethnicity, death causes (for those that have not died) and 3 for new vital status and vital status dates. 
 
-For tumour level data there is some missing data for stage best system, scores and gleason variables
+For tumour level data there is some missing data for stage best system, scores and gleason variables.
 
 We can also map values from the zlookup tables to our columns, which will make examining the data easier.
 
-```{r mapvalues}
+```{r}
 #=============================================================================
 # Map values
 #-----------------------------------------------------------------------------
@@ -125,7 +128,8 @@ str(sim_av_tumour)
 ```
 
 ## a. What is the sex distribution of patients?
-```{r, 1a}
+
+```{r}
 ##############################################################################
 # 1.a. Sex distribution
 
@@ -163,15 +167,16 @@ ggplot(sex_dist, aes(x = Patients, y = Percent, fill = SEX)) +
        y = "Percent (%)",
       title="Sex Distribution of All Patients")
 ```
+
 We can see that the distribution of sex for this dataset is evenly split with only 2 patients that have not specified their gender.
 
 ## b. Prepare a dataset with all lung cancer patients (SITE_ICD10_O2_3CHAR= C34) and their cause of deaths.
 
 This section requires a patient level dataset of those that have had lung cancer. Steps:
 1. Find those that have had tumours relating to lung cancer
-2. Extract patients in the patient level data that correspond to 1.
+2. Extract patients in the patient level data that correspond to 1
 
-```{r, 1b}
+```{r}
 #=============================================================================
 # 1. b. Prepare a dataset with all lung cancer patients (SITE_ICD10_O2_3CHAR= C34) and their cause of deaths.
 
@@ -191,6 +196,7 @@ lung_cancer_patients <- sim_av_patient[sim_av_patient$PATIENTID %in% lung_cancer
 # check
 head(lung_cancer_patients)
 ```
+
 We now have all lung cancer patients with their id, sex, link number, ethnicity, cause of death, vital status and vital status date. 
 
 ## c. Calculate the mean survival time in days for the lung cancer patients who were diagnosed in 2013.
@@ -247,7 +253,13 @@ lung_cancer_patients <- left_join(lung_cancer_patients, first_diagnosis,by="PATI
 # check
 head(lung_cancer_patients)
 ```
-We now create our time variable for survival analysis. This will show in days, the time from first lung cancer diagnosis to status date. We will also create our status variable that flags those that have died as 1 and those that are still alive as 0, as they are right censored.
+
+We now create our time variable for survival analysis. This will be shown in days (the time from first diagnosis to status date). We will also create our status variable that flags those that have died as 1 and those that are still alive as 0, as they are right censored.
+
+Date variables:
+
+* DIAGNOSISDATEBEST = diagnosis date
+* VITALSTATUSDATE = date of vital status
 
 ```{r}
 #-----------------------------------------------------------------------------
@@ -263,9 +275,10 @@ lung_cancer_patients <- lung_cancer_patients %>% mutate(
 head(lung_cancer_patients)
 ```
 Everything looks great! Now lets subset patients that were diagnosed in 2013. 
+
 ```{r}
 #-----------------------------------------------------------------------------
-# filter patients that were diagnosed in 2013 only as per condition.
+# filter patients that were diagnosed in 2013 only as per condition. Of all the lung cancer patients, we only want those that were diagnosed in 2013. 
 lung_cancer_patients_2013 <- lung_cancer_patients %>% filter(DIAGNOSISDATEBEST >= "2013-01-01" & DIAGNOSISDATEBEST <= "2013-12-31") # N = 35210
 
 # See how many have died 
@@ -295,9 +308,10 @@ ggplot(lung_cancer_deaths, aes(x = Patients, y = Percent, fill = NEWVITALSTATUS)
       title="Sex Distribution of All Patients")
 
 ```
+
 We can see that 78% of patients that were diagnosed with lung cancer have died, with 22% alive or exit posting. 
 
-Model survival.
+*Model survival*
 
 First we will calculate the survival probability for lung cancer patients. This shows the probability that a patient survives from the time origin (lung cancer diagnosis) to the event time. 
 
@@ -311,8 +325,8 @@ om.fit <- survfit(Surv(time, status) ~ 1, data = lung_cancer_patients_2013)
 # Change color, linetype by strata, risk.table color by strata
 ggsurvplot(om.fit,
           risk.table = TRUE, # Add risk table
-          risk.table.col = "strata", # Change risk table color by groups
-          linetype = "strata", # Change line type by groups
+          risk.table.col = "strata", 
+          linetype = "strata", 
           surv.median.line = "hv", # Specify median survival
           ggtheme = theme_bw() # Change ggplot2 theme
 )
@@ -320,6 +334,7 @@ ggsurvplot(om.fit,
 ```
 
 We can examine the cumulative events. 
+
 ```{r}
 ggsurvplot(om.fit,
           conf.int = TRUE,
@@ -362,7 +377,8 @@ eth_dist <- sim_av_patient %>%
 # show results
 eth_dist[order(eth_dist$Percent, decreasing =T), ]
 ```
-Before sub-setting the data, we can see that the majority of patients are white British. This is expected as the data is simulated from real cancer data in the UK, however may show potential bias towards certain ethnicities when conducting analysis. 
+
+Before sub-setting the data, we can see that the majority of patients are white British. This is expected as the data is simulated from real cancer data in the UK. This however, is an important factor to consider when conducting an analysis as this may show potential bias towards certain ethnicities. 
 
 ```{r}
 # Calculate the n and percent of patients by gender
@@ -373,7 +389,8 @@ bysex <- sim_av_patient %>%
 bysex <- bysex %>% group_by(ETHNICITY) %>% mutate(Percent = (n/sum(n) * 100), Patients = "All")
 bysex[order(bysex$n, decreasing =T), ]
 ```
-We can see that most ethnicities are fairly split between genders. With the exception on white and black caribbean's, mixed white and asians, chinese, and others showing slighter higher proportion of females.
+
+We can see that most ethnicities are evenly split between genders. With the exception on white and black Caribbean's, mixed white and Asians, Chinese, and others showing slighter higher proportion of females.
 
 ```{r}
 # We are interested in examining non-British males patients. The only identifier of British patients is via the ethnicity "WHITE BRITISH" and "English". Patients that are exclusively "WHITE" could cover those from other European regions 
@@ -403,7 +420,6 @@ p <- ggplot(data = subset(non_british_males, !is.na(non_british_males$ETHNICITY)
 p + coord_flip()
 ```
 
-
 There are a lot of groups for ethnicity. We can group a lot of them together to get five major groups.
 
 ```{r}
@@ -428,12 +444,14 @@ non_british_males$ethnicity_grouped[is.na(non_british_males$ETHNICITY)] <- NA
 ```
 
 View grouped ethnicities. 
+
 ```{r}
 #-----------------------------------------------------------------------------
 # bar chart
 ggplot(data = subset(non_british_males,!is.na(non_british_males$ethnicity_grouped)), aes(x = ethnicity_grouped, fill=ethnicity_grouped)) + 
-  geom_bar() + coord_flip()
+  geom_bar() + coord_flip() + labs(x = "Ethnicity Grouped", y = "Count", title = " Count of Ethnicities in Simulacrum") + scale_fill_discrete(name = "Ethnicity Grouped") 
 ```
+
 White is still the most prominent group among non-British males, followed by Asian, Black, other and mixed. We can explore within each group.
 
 ```{r}
@@ -442,33 +460,34 @@ White is still the most prominent group among non-British males, followed by Asi
 # white
 non_british_males %>% filter(!is.na(non_british_males$ethnicity_grouped) & non_british_males$ETHNICITY %in% white) %>% 
 ggplot(aes(x = ETHNICITY, fill=ETHNICITY)) + 
-  geom_bar() + coord_flip()
+  geom_bar() + coord_flip() + labs(x = "Ethnicity", y = "Count (N)", title = "Breakdown of White Ethnicities") + scale_fill_discrete(name = "Ethnicity") 
 
 # black
 non_british_males %>% filter(!is.na(non_british_males$ethnicity_grouped) & non_british_males$ETHNICITY %in% black) %>% 
 ggplot(aes(x = ETHNICITY, fill=ETHNICITY)) + 
-  geom_bar() + coord_flip()
+  geom_bar() + coord_flip() + labs(x = "Ethnicity", y = "Count (N)", title = "Breakdown of Black Ethnicities") + scale_fill_discrete(name = "Ethnicity") 
 
 # asian 
 non_british_males %>% filter(!is.na(non_british_males$ethnicity_grouped) & non_british_males$ETHNICITY %in% asian) %>% 
 ggplot(aes(x = ETHNICITY, fill=ETHNICITY)) + 
-  geom_bar() + coord_flip()
+  geom_bar() + coord_flip() + labs(x = "Ethnicity", y = "Count (N)", title = "Breakdown of Asian Ethnicities") + scale_fill_discrete(name = "Ethnicity") 
 
 # mixed
 non_british_males %>% filter(!is.na(non_british_males$ethnicity_grouped) & non_british_males$ETHNICITY %in% mixed) %>% 
 ggplot(aes(x = ETHNICITY, fill=ETHNICITY)) + 
-  geom_bar() + coord_flip()
+  geom_bar() + coord_flip() + labs(x = "Ethnicity", y = "Count (N)", title = "Breakdown of Mixed Ethnicities") + scale_fill_discrete(name = "Ethnicity") 
 
 ```
+
 Asian indians make up most of the Asian category and black carribeans make up most of the black ethnic group. For thsoe that are mixed, other was the most prominent, followed by black and white caribbean.
 
 ## b. Explore the data to find an interesting or insightful aspect that you can then communicate visually. Be creative!
 
-Here we will examing ethnicity and sex for our lung cancer patients.
+Here we will examine the ethnicity for our lung cancer patients that were diagnosed in 2013. Let's first apply the same grouping technique as above. 
 
-```{r 2b}
+```{r}
 #=============================================================================
-# 2.b. Explore
+# 2.b. Explore: Group ethnicities
 
 # White, black, asian, mixed, ethnic
 white <- c("C ANY OTHER WHITE BACKGROUND", "WHITE BRITISH", "WHITE", "WHITE IRISH", "English")
@@ -491,6 +510,8 @@ lung_cancer_patients_2013$ethnicity_grouped[is.na(lung_cancer_patients_2013$ETHN
 
 ```
 
+Count the ethnicities amongst lung cancer patients diagnosed in 2013. 
+
 ```{r}
 lung_cancer_order <- 
   lung_cancer_patients_2013 %>%
@@ -505,26 +526,32 @@ lung_cancer_order[order(lung_cancer_order$Percent, decreasing = T),]
 ```{r}
 # create stacked bar chart
 ggplot(lung_cancer_order, aes(x = ethnicity_grouped, y = Percent, fill = ethnicity_grouped)) + 
-  geom_bar(stat='identity') + coord_flip()
+  geom_bar(stat='identity') + coord_flip() + labs(x = "Ethnicity Grouped", y = "Count (N)", title = " Count of Ethnicities in Simulacrum") + scale_fill_discrete(name = "Ethnicity Grouped") 
 ```
-Majority of the patients that were diaagnosed with lung cancer in 2013 were white, followed by asian, blackother and mixed. 
+
+Majority of the patients that were diagnosed with lung cancer in 2013 were white, followed by Asian, Black, other and mixed. 
+
+We can also examine of these patients, what was the gender split by ethnicity.
 
 ```{r}
-# Calculate the n and percent of patients by gender
+# Calculate the n of patients
 bysex <- lung_cancer_patients_2013 %>%
   group_by(ethnicity_grouped, SEX) %>%
   count(ethnicity_grouped, SEX)
 
+# Calculate the percent by group 
 bysex <- bysex %>% group_by(ethnicity_grouped) %>% mutate(Percent = (n/sum(n) * 100), Patients = "All")
 bysex[order(bysex$n, decreasing =T), ]
 
-# 1.a. Sex distribution
+# add labels for plot
 bysex$label = paste0(sprintf("%.0f", bysex$Percent), "%")
 
+# create plot
 ggplot(bysex, aes(x = ethnicity_grouped, y = Percent, fill = SEX)) + 
   geom_bar(position = "stack", stat='identity') + 
-  geom_text(aes(label = label), position = position_stack(vjust = 0.5), size = 4) + coord_flip() 
+  geom_text(aes(label = label), position = position_stack(vjust = 0.5), size = 4) + coord_flip() + labs(x = "Ethnicity Grouped", y = "Percent (%)", title = " Gender Split by Ethnicity for Lung Cancer Patients Diagnosed in 2013") + scale_fill_discrete(name = "Ethnicity Grouped") 
 ```
+
 Interestingly we can see that males had the higher proportion of those that were diagnosed with lung cancer. Of these, 70% of asian males were diagnosed with lung cancer, 63% of black males, 68% of mixed males and 60% of other ethnicity. 
 
 ```{r}
@@ -541,9 +568,10 @@ bysex$label = paste0(sprintf("%.0f", bysex$Percent), "%")
 
 ggplot(bysex, aes(x = ETHNICITY, y = Percent, fill = SEX)) + 
   geom_bar(position = "stack", stat='identity') + 
-  geom_text(aes(label = label), position = position_stack(vjust = 0.5), size = 4) + coord_flip() 
+  geom_text(aes(label = label), position = position_stack(vjust = 0.5), size = 4) + coord_flip() + labs(x = "Ethnicity", y = "Percent (%)", title = " Gender Split by Ethnicity for Lung Cancer Patients Diagnosed in 2013") + scale_fill_discrete(name = "Sex") 
 ```
-When breaking the ethnicities further, we can see that 80% of males from bangladesh and 70% of males from India were diagnosed with lung cancer.
+
+When breaking the ethnicities further, we can see that 80% of males from bangladesh and 70% of males from India were diagnosed with lung cancer. Of those that stated they were white (not British or Irish), the majority (69%) were female. It would be interesting to understand why there are such large gender imbalances across ethnicities for lung cancer patients in the data. 
 
 
 _Data used artificial data from the Simulacrum, a synthetic dataset developed by Health Data Insight CiC derived from anonymous cancer data provided by the National Cancer Registration and Analysis Service, which is part of Public Health England_

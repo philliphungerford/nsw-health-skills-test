@@ -27,6 +27,8 @@ c. Calculate the mean survival time in days for the lung cancer patients who wer
 ## Dataset details
 The Simulacrum is a dataset that contains artificial patient-like cancer data to help researchers gain insights.
 
+Simulacrum contains 2013 – 2017 diagnoses and treatment follow up to March 2018. 
+
 First we download the data and check it against the data dictionary. The Cancer Outcomes & Services Dataset (COSD) is comprised of patient level data (sim_av_patient) and tumour level data (sim_av_tumour). These two tables are linked by the patient IDs (PATIENTID).
 
 ["Figure 1. - Data linkage information"](images/simulacrum-schema.png)
@@ -106,12 +108,12 @@ sim_av_patient <- sim_av_patient %>% mutate_at(c('SEX',
                                                  'ETHNICITY',
                                                  'NEWVITALSTATUS'), as.factor)
 # Dates
-sim_av_patient %>% 
+sim_av_patient <- sim_av_patient %>% 
   mutate(
     VITALSTATUSDATE  = as.Date(VITALSTATUSDATE , format = "%Y-%m-%d")
   )
 
-sim_av_tumour %>% 
+sim_av_tumour <- sim_av_tumour %>% 
   mutate(
     DIAGNOSISDATEBEST  = as.Date(DIAGNOSISDATEBEST , format = "%Y-%m-%d")
   )
@@ -372,8 +374,10 @@ table(non_british_males$ETHNICITY)
 
 ```{r}
 # bar chart
-ggplot(data = non_british_males, aes(x = ETHNICITY, fill=ETHNICITY)) + 
+p <- ggplot(data = subset(non_british_males, !is.na(non_british_males$ETHNICITY)), aes(x = ETHNICITY, fill=ETHNICITY)) + 
   geom_bar()
+
+p + coord_flip()
 ```
 
 
@@ -399,40 +403,69 @@ non_british_males$ethnicity_grouped[non_british_males$ETHNICITY %in% other] <- "
 non_british_males$ethnicity_grouped[non_british_males$ETHNICITY %in% notKnown] <- NA
 non_british_males$ethnicity_grouped[is.na(non_british_males$ETHNICITY)] <- NA
 ```
+
+View grouped ethnicities. 
 ```{r}
 #-----------------------------------------------------------------------------
 # bar chart
 ggplot(data = subset(non_british_males,!is.na(non_british_males$ethnicity_grouped)), aes(x = ethnicity_grouped, fill=ethnicity_grouped)) + 
-  geom_bar()
+  geom_bar() + coord_flip()
 ```
-We can explore within each group.
+White is still the most prominent group among non-British males, followed by Asian, Black, other and mixed. We can explore within each group.
 
 ```{r}
-white <- c("C ANY OTHER WHITE BACKGROUND", "WHITE BRITISH", "WHITE", "WHITE IRISH", "English")
-black <- c("BLACK AFRICAN", "BLACK CARIBBEAN", "P ANY OTHER BLACK BACKGROUND")
-mixed <- c("G ANY OTHER MIXED BACKGROUND", "MIXED WHITE AND BLACK AFRICAN", "MIXED WHITE AND ASIAN", "WHITE AND BLACK CARIBBEAN")
-asian <- c("ASIAN PAKISTANI", "ASIAN BANGLADESHI", "L ANY OTHER ASIAN BACKGROUND", "ASIAN INDIAN", "CHINESE")
-other <- c("8 OTHER", "S ANY OTHER ETHNIC GROUP")
-notKnown <- c("NOT STATED", "X NOT KNOWN")
+# Split by groups
 
-# breakdown of white ethnicity 
+# white
+non_british_males %>% filter(!is.na(non_british_males$ethnicity_grouped) & non_british_males$ETHNICITY %in% white) %>% 
+ggplot(aes(x = ETHNICITY, fill=ETHNICITY)) + 
+  geom_bar() + coord_flip()
 
-p <-ggplot(subset(non_british_males, !is.na(non_british_males$ethnicity_grouped)), aes(x = ETHNICITY, fill=ETHNICITY)) + 
-  geom_bar() 
+# black
+non_british_males %>% filter(!is.na(non_british_males$ethnicity_grouped) & non_british_males$ETHNICITY %in% black) %>% 
+ggplot(aes(x = ETHNICITY, fill=ETHNICITY)) + 
+  geom_bar() + coord_flip()
 
-p + facet_grid(cols = vars(ethnicity_grouped))
+# asian 
+non_british_males %>% filter(!is.na(non_british_males$ethnicity_grouped) & non_british_males$ETHNICITY %in% asian) %>% 
+ggplot(aes(x = ETHNICITY, fill=ETHNICITY)) + 
+  geom_bar() + coord_flip()
+
+# mixed
+non_british_males %>% filter(!is.na(non_british_males$ethnicity_grouped) & non_british_males$ETHNICITY %in% mixed) %>% 
+ggplot(aes(x = ETHNICITY, fill=ETHNICITY)) + 
+  geom_bar() + coord_flip()
 
 ```
+Asian indians make up most of the Asian category and black carribeans make up most of the black ethnic group. For thsoe that are mixed, other was the most prominent, followed by black and white caribbean.
 
 
 ## b. Explore the data to find an interesting or insightful aspect that you can then communicate visually. Be creative!
+
 
 ```{r 2b}
 #=============================================================================
 # 2.b. Explore
 
+### IDEAS
 
-# a. Age at lung cancer diagnosis
+# distribution of tumours
+# split by sex, age, diagnosis?
+t <- as.data.frame(table(sim_av_tumour$PATIENTID))
+hist(t$Freq)
+max(t$Freq)
+
+
+# Age at lung cancer diagnosis
+
+# explore breastcancer patients?
+# SELECT COUNT(DISTINCT PATIENTID) FROM SIM_AV_TUMOUR
+# WHERE SITE_ICD10_O2_3CHAR=’C50′
+
+# examine deaths by ethnicity for a certain illness (e.g. lung cancer across ethnicity, deaths across ethnicity)
+
+# limitations of data
+
 ```
 
 _Data used artificial data from the Simulacrum, a synthetic dataset developed by Health Data Insight CiC derived from anonymous cancer data provided by the National Cancer Registration and Analysis Service, which is part of Public Health England_

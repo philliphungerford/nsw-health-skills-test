@@ -347,10 +347,31 @@ b. Explore the data to find an interesting or insightful aspect that you can the
 
 ## a. Visualise the proportion of all ethnic groups among non-British male patients. You can find ethnic information of patients in the data dictionary provided in the simulacrum dataset.
 
-```{r 2a}
-##############################################################################
-# 2.a. Visualise
+```{r, 2a}
+# Calculate the n and percent of patients by gender
+eth_dist <- sim_av_patient %>%
+  count(ETHNICITY) %>%
+  # count creates a column called 'n'
+  mutate(Percent = round(n / sum(n) * 100,2),
+         Patients = "All")
 
+# show results
+eth_dist[order(eth_dist$Percent, decreasing =T), ]
+```
+Before sub-setting the data, we can see that the majority of patients are white British. This is expected as the data is simulated from real cancer data in the UK, however may show potential bias towards certain ethnicities when conducting analysis. 
+
+```{r}
+# Calculate the n and percent of patients by gender
+bysex <- sim_av_patient %>%
+  group_by(ETHNICITY, SEX) %>%
+  count(ETHNICITY, SEX)
+
+bysex <- bysex %>% group_by(ETHNICITY) %>% mutate(Percent = (n/sum(n) * 100), Patients = "All")
+bysex[order(bysex$n, decreasing =T), ]
+```
+We can see that most ethnicities are fairly split between genders. With the exception on white and black caribbean's, mixed white and asians, chinese, and others showing slighter higher proportion of females.
+
+```{r 2a}
 # We are interested in examining non-British males patients. The only identifier of British patients is via the ethnicity "WHITE BRITISH" and "English". Patients that are exclusively "WHITE" could cover those from other European regions 
 
 exclusions <- c("WHITE BRITISH", "English")
@@ -363,9 +384,6 @@ non_british_males <- sim_av_patient %>% filter(SEX == 'MALE' & ETHNICITY %notin%
 
 cat("Out of the", length(unique(sim_av_patient$PATIENTID)), "patients, there are", length(unique(non_british_males$PATIENTID)), "that are non-british males.")
 ```
-
-
-
 
 ```{r}
 # check distribution of ethnicities
@@ -441,30 +459,86 @@ Asian indians make up most of the Asian category and black carribeans make up mo
 
 ## b. Explore the data to find an interesting or insightful aspect that you can then communicate visually. Be creative!
 
+Here we will examing ethnicity and sex for our lung cancer patients.
 
 ```{r 2b}
 #=============================================================================
 # 2.b. Explore
 
-### IDEAS
+# White, black, asian, mixed, ethnic
+white <- c("C ANY OTHER WHITE BACKGROUND", "WHITE BRITISH", "WHITE", "WHITE IRISH", "English")
+black <- c("BLACK AFRICAN", "BLACK CARIBBEAN", "P ANY OTHER BLACK BACKGROUND")
+mixed <- c("G ANY OTHER MIXED BACKGROUND", "MIXED WHITE AND BLACK AFRICAN", "MIXED WHITE AND ASIAN", "WHITE AND BLACK CARIBBEAN")
+asian <- c("ASIAN PAKISTANI", "ASIAN BANGLADESHI", "L ANY OTHER ASIAN BACKGROUND", "ASIAN INDIAN", "CHINESE")
+other <- c("8 OTHER", "S ANY OTHER ETHNIC GROUP")
+notKnown <- c("NOT STATED", "X NOT KNOWN")
 
-# distribution of tumours
-# split by sex, age, diagnosis?
-t <- as.data.frame(table(sim_av_tumour$PATIENTID))
-hist(t$Freq)
-max(t$Freq)
 
-
-# Age at lung cancer diagnosis
-
-# explore breastcancer patients?
-# SELECT COUNT(DISTINCT PATIENTID) FROM SIM_AV_TUMOUR
-# WHERE SITE_ICD10_O2_3CHAR=’C50′
-
-# examine deaths by ethnicity for a certain illness (e.g. lung cancer across ethnicity, deaths across ethnicity)
-
-# limitations of data
+# create grouped variable
+lung_cancer_patients_2013$ethnicity_grouped <- NA
+lung_cancer_patients_2013$ethnicity_grouped[lung_cancer_patients_2013$ETHNICITY %in% white] <- "WHITE"
+lung_cancer_patients_2013$ethnicity_grouped[lung_cancer_patients_2013$ETHNICITY %in% black] <- "BLACK"
+lung_cancer_patients_2013$ethnicity_grouped[lung_cancer_patients_2013$ETHNICITY %in% mixed] <- "MIXED"
+lung_cancer_patients_2013$ethnicity_grouped[lung_cancer_patients_2013$ETHNICITY %in% asian] <- "ASIAN"
+lung_cancer_patients_2013$ethnicity_grouped[lung_cancer_patients_2013$ETHNICITY %in% other] <- "OTHER"
+lung_cancer_patients_2013$ethnicity_grouped[lung_cancer_patients_2013$ETHNICITY %in% notKnown] <- NA
+lung_cancer_patients_2013$ethnicity_grouped[is.na(lung_cancer_patients_2013$ETHNICITY)] <- NA
 
 ```
+
+```{r}
+lung_cancer_order <- 
+  lung_cancer_patients_2013 %>%
+  count(ethnicity_grouped) %>%
+  mutate(Percent = round(n / sum(n) * 100,2),
+         Patients = "All")
+
+# add label for plot
+lung_cancer_order[order(lung_cancer_order$Percent, decreasing = T),]
+```
+
+```{r}
+# create stacked bar chart
+ggplot(lung_cancer_order, aes(x = ethnicity_grouped, y = Percent, fill = ethnicity_grouped)) + 
+  geom_bar(stat='identity') + coord_flip()
+```
+Majority of the patients that were diaagnosed with lung cancer in 2013 were white, followed by asian, blackother and mixed. 
+
+```{r}
+# Calculate the n and percent of patients by gender
+bysex <- lung_cancer_patients_2013 %>%
+  group_by(ethnicity_grouped, SEX) %>%
+  count(ethnicity_grouped, SEX)
+
+bysex <- bysex %>% group_by(ethnicity_grouped) %>% mutate(Percent = (n/sum(n) * 100), Patients = "All")
+bysex[order(bysex$n, decreasing =T), ]
+
+# 1.a. Sex distribution
+bysex$label = paste0(sprintf("%.0f", bysex$Percent), "%")
+
+ggplot(bysex, aes(x = ethnicity_grouped, y = Percent, fill = SEX)) + 
+  geom_bar(position = "stack", stat='identity') + 
+  geom_text(aes(label = label), position = position_stack(vjust = 0.5), size = 4) + coord_flip() 
+```
+Interestingly we can see that males had the higher proportion of those that were diagnosed with lung cancer. Of these, 70% of asian males were diagnosed with lung cancer, 63% of black males, 68% of mixed males and 60% of other ethnicity. 
+
+```{r}
+# Calculate the n and percent of patients by gender
+bysex <- lung_cancer_patients_2013 %>%
+  group_by(ETHNICITY, SEX) %>%
+  count(ETHNICITY, SEX)
+
+bysex <- bysex %>% group_by(ETHNICITY) %>% mutate(Percent = (n/sum(n) * 100), Patients = "All")
+bysex[order(bysex$n, decreasing =T), ]
+
+# 1.a. Sex distribution
+bysex$label = paste0(sprintf("%.0f", bysex$Percent), "%")
+
+ggplot(bysex, aes(x = ETHNICITY, y = Percent, fill = SEX)) + 
+  geom_bar(position = "stack", stat='identity') + 
+  geom_text(aes(label = label), position = position_stack(vjust = 0.5), size = 4) + coord_flip() 
+```
+When breaking the ethnicities further, we can see that 80% of males from bangladesh and 70% of males from India were diagnosed with lung cancer.
+
 
 _Data used artificial data from the Simulacrum, a synthetic dataset developed by Health Data Insight CiC derived from anonymous cancer data provided by the National Cancer Registration and Analysis Service, which is part of Public Health England_

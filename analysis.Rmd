@@ -415,7 +415,7 @@ table(non_british_males$ETHNICITY)
 ```{r}
 # bar chart
 p <- ggplot(data = subset(non_british_males, !is.na(non_british_males$ETHNICITY)), aes(x = ETHNICITY, fill=ETHNICITY)) + 
-  geom_bar()
+  geom_bar() + labs(x = "Ethnicities", y = "Count (N)", title = " Count of Ethnicities in Simulacrum") + scale_fill_discrete(name = "Ethnicity") + theme(legend.position = "none")
 
 p + coord_flip()
 ```
@@ -449,7 +449,7 @@ View grouped ethnicities.
 #-----------------------------------------------------------------------------
 # bar chart
 ggplot(data = subset(non_british_males,!is.na(non_british_males$ethnicity_grouped)), aes(x = ethnicity_grouped, fill=ethnicity_grouped)) + 
-  geom_bar() + coord_flip() + labs(x = "Ethnicity Grouped", y = "Count", title = " Count of Ethnicities in Simulacrum") + scale_fill_discrete(name = "Ethnicity Grouped") 
+  geom_bar() + coord_flip() + labs(x = "Ethnicity Grouped", y = "Count (N)", title = " Count of Ethnicities in Simulacrum") + scale_fill_discrete(name = "Ethnicity Grouped") 
 ```
 
 White is still the most prominent group among non-British males, followed by Asian, Black, other and mixed. We can explore within each group.

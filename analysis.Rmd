@@ -195,6 +195,9 @@ We now have all lung cancer patients with their id, sex, link number, ethnicity,
 
 ## c. Calculate the mean survival time in days for the lung cancer patients who were diagnosed in 2013.
 
+*Cohort*
+The cohort for the survival analysis will be patients that have ever had a lung cancer diagnosis and were diagnosed in 2013. 
+
 To calculate the mean survival time, we will conduct a survival analysis. In order to conduct a survival analysis we need to define: 
 1. *Mean survival*: The average length of time from date of lung cancer diagnosis who are still alive.
 2. *Target event*: The event of interest will be death status.
@@ -336,7 +339,8 @@ Survival analysis shows that the median survival for 50% of patients is 312 days
 #The mean survival time in lung cancer patients followed-up to 5 years
 survival:::survmean(om.fit, rmean=5*365) [[1]]["*rmean"]
 ```
-If we examine the 5 year survival time (1825 days). In the first 5 years, the expected number of days experienced by lung cancer patients is 682 (1.8 years).
+
+The restricted mean survival time for a 5-year period is 682 days (1.8 years).
 
 # 2. Visualising Data
 Using the UK synthetic cancer registry data (Simulacrum):
@@ -347,7 +351,7 @@ b. Explore the data to find an interesting or insightful aspect that you can the
 
 ## a. Visualise the proportion of all ethnic groups among non-British male patients. You can find ethnic information of patients in the data dictionary provided in the simulacrum dataset.
 
-```{r, 2a}
+```{r}
 # Calculate the n and percent of patients by gender
 eth_dist <- sim_av_patient %>%
   count(ETHNICITY) %>%
@@ -371,7 +375,7 @@ bysex[order(bysex$n, decreasing =T), ]
 ```
 We can see that most ethnicities are fairly split between genders. With the exception on white and black caribbean's, mixed white and asians, chinese, and others showing slighter higher proportion of females.
 
-```{r 2a}
+```{r}
 # We are interested in examining non-British males patients. The only identifier of British patients is via the ethnicity "WHITE BRITISH" and "English". Patients that are exclusively "WHITE" could cover those from other European regions 
 
 exclusions <- c("WHITE BRITISH", "English")
@@ -382,6 +386,7 @@ exclusions <- c("WHITE BRITISH", "English")
 # subset data
 non_british_males <- sim_av_patient %>% filter(SEX == 'MALE' & ETHNICITY %notin% exclusions)
 
+# Show patients that were non-british
 cat("Out of the", length(unique(sim_av_patient$PATIENTID)), "patients, there are", length(unique(non_british_males$PATIENTID)), "that are non-british males.")
 ```
 

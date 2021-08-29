@@ -10,6 +10,7 @@ knitr::opts_chunk$set(echo = TRUE)
 library(dplyr) # for filtering and data manipulation
 library(ggplot2) # for data visualisation
 library(survival) # for survival analysis
+library(survminer) # for plotting survival curves
 ```
 
 # 1. Analysing Data
@@ -26,13 +27,20 @@ c. Calculate the mean survival time in days for the lung cancer patients who wer
 ## Dataset details
 The Simulacrum is a dataset that contains artificial patient-like cancer data to help researchers gain insights.
 
-First we download the data and check it against the data dictionary. 
+First we download the data and check it against the data dictionary. The Cancer Outcomes & Services Dataset (COSD) is comprised of patient level data (sim_av_patient) and tumour level data (sim_av_tumour). These two tables are linked by the patient IDs (PATIENTID).
+
+["Figure 1. - Data linkage information"](images/simulacrum-schema.png)
+
+Based on this information, we download the data and check it against the data dictionary. 
 ```{r data}
-# load patient level data with death information
-sim_av_patient <- read.csv("simulacrum_release_v1.2.0.2017/data/sim_av_patient.csv", na.strings = c(""))
+##############################################################################
+# Prepare data
+#=============================================================================
+# Load patient level data with death information
+sim_av_patient <- read.csv("simulacrum_release_v1.2.0.2017/data/sim_av_patient.csv", na.strings = c("", " "))
 
 # load tumour level data with patient ID
-sim_av_tumour <- read.csv("simulacrum_release_v1.2.0.2017/data/sim_av_tumour.csv")
+sim_av_tumour <- read.csv("simulacrum_release_v1.2.0.2017/data/sim_av_tumour.csv", na.strings = c("", " "))
 
 # inspect 
 head(sim_av_patient)
@@ -54,12 +62,14 @@ na_count <-sapply(sim_av_tumour, function(y) sum(length(which(is.na(y)))))
 na_count <- data.frame(na_count)
 print(na_count)
 ```
-For patient level data there is missing data for ethnicity, death causes (understandable for those that have not died) and 3 for new vital status and vital status dates. 
+For patient level data there is missing data for ethnicity, death causes (for those that have not died) and 3 for new vital status and vital status dates. 
 
 For tumour level data there is some missing data for stage best system, scores and gleason variables
 
-We can also map values from the zlookup tables to our columns, which will make examining the data easier. 
+We can also map values from the zlookup tables to our columns, which will make examining the data easier.
+
 ```{r mapvalues}
+#=============================================================================
 # Map values
 #-----------------------------------------------------------------------------
 # clean vital status
@@ -70,8 +80,8 @@ for (i in 1:nrow(zvitalstatus_lookup)){
 }
 
 table(sim_av_patient$NEWVITALSTATUS)
-#-----------------------------------------------------------------------------
 
+#-----------------------------------------------------------------------------
 # clean age
 zsex_lookup <- read.csv('simulacrum_release_v1.2.0.2017/data_dictionary_files/zsex_lookup.csv')
 
@@ -107,30 +117,18 @@ sim_av_tumour %>%
   )
 
 #-----------------------------------------------------------------------------
-#Check
+# Check
 str(sim_av_patient)
 str(sim_av_tumour)
 ```
- 
-```{r}
- # library
-library(ggplot2)
- 
-# create a dataset
-specie <- c(rep("sorgho" , 3) )
-condition <- rep(c("normal" , "stress" , "Nitrogen") , 4)
-value <- abs(rnorm(12 , 0 , 15))
-data <- data.frame(specie,condition,value)
 
-head(data)
-# Stacked
-ggplot(data, aes(fill=condition, y=value, x=specie)) + 
-    geom_bar(position="stack", stat="identity")
-```
- 
 ## a. What is the sex distribution of patients?
-```{r 1a}
+```{r, 1a}
+##############################################################################
 # 1.a. Sex distribution
+
+#-----------------------------------------------------------------------------
+# Calculate the n and percent of patients by gender
 sex_dist <- sim_av_patient %>%
   count(SEX) %>%
   # count creates a column called 'n'
@@ -139,7 +137,9 @@ sex_dist <- sim_av_patient %>%
 
 # show results
 sex_dist
-# we can also visualise this in a stacked bar chart
+
+#-----------------------------------------------------------------------------
+# Visualise the data
 
 # 1.a. Sex distribution
 sex_dist$label = paste0(sprintf("%.0f", sex_dist$Percent), "%")
@@ -161,7 +161,7 @@ ggplot(sex_dist, aes(x = Patients, y = Percent, fill = SEX)) +
        y = "Percent (%)",
       title="Sex Distribution of All Patients")
 ```
-We can see that the distribution of sex for this dataset is mostly even with 2 patients that have not specified. 
+We can see that the distribution of sex for this dataset is evenly split with only 2 patients that have not specified their gender.
 
 ## b. Prepare a dataset with all lung cancer patients (SITE_ICD10_O2_3CHAR= C34) and their cause of deaths.
 
@@ -169,8 +169,11 @@ This section requires a patient level dataset of those that have had lung cancer
 1. Find those that have had tumours relating to lung cancer
 2. Extract patients in the patient level data that correspond to 1.
 
-```{r}
-#===============================================================================
+```{r, 1b}
+#=============================================================================
+# 1. b. Prepare a dataset with all lung cancer patients (SITE_ICD10_O2_3CHAR= C34) and their cause of deaths.
+
+#-----------------------------------------------------------------------------
 # 1. Find those that have had tumours relating to lung cancer
 
 # define our target ICD10 code for lung cancer (C34: Malignant neoplasm of bronchus and lung)
@@ -179,7 +182,7 @@ target <- "C34"
 # Extract the IDs for patients with lung cancer tumours (There are 167233 patients that have lung cancer)
 lung_cancer_patient_ids <- unique(sim_av_tumour$PATIENTID[sim_av_tumour$SITE_ICD10_O2_3CHAR == target])
 
-#===============================================================================
+#-----------------------------------------------------------------------------
 # 2. Extract patients in the patient level data that correspond to 1.
 lung_cancer_patients <- sim_av_patient[sim_av_patient$PATIENTID %in% lung_cancer_patient_ids,]
 
@@ -190,6 +193,12 @@ We now have all lung cancer patients with their id, sex, link number, ethnicity,
 
 ## c. Calculate the mean survival time in days for the lung cancer patients who were diagnosed in 2013.
 
+To calculate the mean survival time, we will conduct a survival analysis. In order to conduct a survival analysis we need to define: 
+1. *Mean survival*: The average length of time from date of lung cancer diagnosis who are still alive.
+2. *Target event*: The event of interest will be death status.
+3. *Time origin*: The time at which follow-up time starts is the date of lung cancer diagnosis.
+4. *Time scale*: Time will be days from time origin to time of event, and patients will be right censored (for those that are alive).
+
 In order to do survival analysis, we also need to prepare the data a bit further. Key components for survival analysis are (for each subject i): 
 1. Event time Ti
 2. Censoring time Ci
@@ -198,10 +207,9 @@ In order to do survival analysis, we also need to prepare the data a bit further
   - 0 if censored (i.e. Ti>Ci)
 4. Observed time Yi=min(Ti,Ci)
 
-The observed times and an event indicator are provided in the lung data
-
-time: Survival time in days (Yi)
-status: censoring status 0=censored, 1=dead (δi)
+The observed times and an event indicator are provided in the lung data. We will create:
+- time: Survival time in days (Yi)
+- status: censoring status 0=censored, 1=dead (δi)
 
 Here we will be modeling survival for those that were diagnosed with lung cancer tumours from 2013. We need to therefore:
 1. Find the first diagnosis date for lung cancer patients
@@ -209,6 +217,10 @@ Here we will be modeling survival for those that were diagnosed with lung cancer
 2. Create a time variable that shows the time from diagnosis until status. 
 
 ```{r}
+#=============================================================================
+# 1.c. Calculate the mean survival time in days for the lung cancer patients who were diagnosed in 2013.
+#-----------------------------------------------------------------------------
+
 # 1. Find the first diagnosis date for lung cancer patients
 
 # get lung cancer tumours
@@ -233,6 +245,7 @@ head(lung_cancer_patients)
 We now create our time variable for survival analysis. This will show in days, the time from first lung cancer diagnosis to status date. We will also create our status variable that flags those that have died as 1 and those that are still alive as 0, as they are right censored.
 
 ```{r}
+#-----------------------------------------------------------------------------
 # format dates and calculate time from diagnosis to event
 lung_cancer_patients <- lung_cancer_patients %>% mutate(
   DIAGNOSISDATEBEST = as.Date(DIAGNOSISDATEBEST, format = "%Y-%m-%d"),
@@ -246,6 +259,7 @@ head(lung_cancer_patients)
 ```
 Everything looks great! Now lets subset patients that were diagnosed in 2013. 
 ```{r}
+#-----------------------------------------------------------------------------
 # filter patients that were diagnosed in 2013 only as per condition.
 lung_cancer_patients_2013 <- lung_cancer_patients %>% filter(DIAGNOSISDATEBEST >= "2013-01-01" & DIAGNOSISDATEBEST <= "2013-12-31") # N = 35210
 
@@ -280,54 +294,47 @@ We can see that 78% of patients that were diagnosed with lung cancer have died, 
 
 Model survival.
 
-First we will calculate the survival probability for lung cancer patients. This shows the probability that a patient survives from the time origin (lung cancer diagnosis) to the specified future time. 
+First we will calculate the survival probability for lung cancer patients. This shows the probability that a patient survives from the time origin (lung cancer diagnosis) to the event time. 
 
 ```{r}
-# Survival from diagnosis -> death
+#-----------------------------------------------------------------------------
+# Survival analysis 
 
 # Kaplan-Meier estimate can be obtained as numbers by using survfit 
 om.fit <- survfit(Surv(time, status) ~ 1, data = lung_cancer_patients_2013) 
 
-plot(survfit(Surv(time, status) ~ 1, data = lung_cancer_patients_2013), 
-     xlab = "Days", 
-     ylab = "Overall survival probability")
+# Change color, linetype by strata, risk.table color by strata
+ggsurvplot(om.fit,
+          risk.table = TRUE, # Add risk table
+          risk.table.col = "strata", # Change risk table color by groups
+          linetype = "strata", # Change line type by groups
+          surv.median.line = "hv", # Specify median survival
+          ggtheme = theme_bw() # Change ggplot2 theme
+)
 
+```
+
+We can examine the cumulative events. 
+```{r}
+ggsurvplot(om.fit,
+          conf.int = TRUE,
+          risk.table.col = "strata",
+          ggtheme = theme_bw(), # Change ggplot2 theme
+          fun = "event")
+```
+
+```{r}
 # calculate mean, median survival time
 print(om.fit, print.rmean=TRUE)
 ```
 
-Second we can also calculate the hazard, which shows the probability that an individual who is under observation at time t, has an event at that time. 
-```{r 1c}
+Survival analysis shows that the median survival for 50% of patients is 312 days.
 
-
-
-
-## Report how many deaths were there during the follow-up and what was the median follow-up time until death.
-# get the mean and median survival times
-#print(om.fit, print.rmean = TRUE) #1976
-
-# plotting Nelson-Aalen estimate
-om.fit <- survfit( Surv(time, status) ~ 1, data = lung_cancer_patients_2013) 
-summary(om.fit)
-plot(om.fit, fun="cumhaz", main = "Nelson-Aalen estimate of cumulative hazard function")
-
-
-# Plot the Kaplan-Meier survival curves by all categorical variables in the data.
-om.fit3 <- survfit(Surv(time, status) ~ SEX, data = lung_cancer_patients_2013) 
-
-# plotting Kaplan-Meier estimate
-plot(om.fit3, col=c('blue', 'red', 'green'), main = 'Kaplan-Meier estimate for Sex')
-
-# Carry out the log-rank tests for differences in survival experience by the categorical variables and interpret the results.
-# 2-sample log-rank test
-om.fit2b <- coxph( Surv(time, status) ~ SEX, data = lung_cancer_patients_2013) 
-summary(om.fit2b)
-
-# fitting a simple Cox model for sex
-cox.rx <- coxph( Surv(time, status) ~ SEX, data = lung_cancer_patients_2013) 
-summary(cox.rx) #sig p=0.003
-
+```{r}
+#The mean survival time in lung cancer patients followed-up to 5 years
+survival:::survmean(om.fit, rmean=5*365) [[1]]["*rmean"]
 ```
+If we examine the 5 year survival time (1825 days). In the first 5 years, the expected number of days experienced by lung cancer patients is 682 (1.8 years).
 
 # 2. Visualising Data
 Using the UK synthetic cancer registry data (Simulacrum):
@@ -338,31 +345,94 @@ b. Explore the data to find an interesting or insightful aspect that you can the
 
 ## a. Visualise the proportion of all ethnic groups among non-British male patients. You can find ethnic information of patients in the data dictionary provided in the simulacrum dataset.
 
-
 ```{r 2a}
+##############################################################################
 # 2.a. Visualise
 
-exclusions <- c("WHITE BRITISH", "X NOT KNOWN", "NOT STATED")
+# We are interested in examining non-British males patients. The only identifier of British patients is via the ethnicity "WHITE BRITISH" and "English". Patients that are exclusively "WHITE" could cover those from other European regions 
+
+exclusions <- c("WHITE BRITISH", "English")
 
 # we create a not in for our exclusions filter
 `%notin%` <- Negate(`%in%`)
 
 # subset data
-non_british_males <- analysis_data %>% filter(SEX == 'MALE' & ETHNICITY %notin% exclusions)
+non_british_males <- sim_av_patient %>% filter(SEX == 'MALE' & ETHNICITY %notin% exclusions)
 
+cat("Out of the", length(unique(sim_av_patient$PATIENTID)), "patients, there are", length(unique(non_british_males$PATIENTID)), "that are non-british males.")
+```
+
+
+
+
+```{r}
 # check distribution of ethnicities
 table(non_british_males$ETHNICITY)
+```
 
+```{r}
 # bar chart
-ggplot(data = non_british_males, aes(x = ETHNICITY)) + 
+ggplot(data = non_british_males, aes(x = ETHNICITY, fill=ETHNICITY)) + 
   geom_bar()
 ```
 
-## b. Explore the data to find an interesting or insightful aspect that you can then communicate visually. Be creative!
-```{r 2b}
-# 2.b. Explore
+
+There are a lot of groups for ethnicity. We can group a lot of them together to get five major groups.
+
+```{r}
+# White, black, asian, mixed, ethnic
+white <- c("C ANY OTHER WHITE BACKGROUND", "WHITE BRITISH", "WHITE", "WHITE IRISH", "English")
+black <- c("BLACK AFRICAN", "BLACK CARIBBEAN", "P ANY OTHER BLACK BACKGROUND")
+mixed <- c("G ANY OTHER MIXED BACKGROUND", "MIXED WHITE AND BLACK AFRICAN", "MIXED WHITE AND ASIAN", "WHITE AND BLACK CARIBBEAN")
+asian <- c("ASIAN PAKISTANI", "ASIAN BANGLADESHI", "L ANY OTHER ASIAN BACKGROUND", "ASIAN INDIAN", "CHINESE")
+other <- c("8 OTHER", "S ANY OTHER ETHNIC GROUP")
+notKnown <- c("NOT STATED", "X NOT KNOWN")
+
+
+# create grouped variable
+non_british_males$ethnicity_grouped <- NA
+non_british_males$ethnicity_grouped[non_british_males$ETHNICITY %in% white] <- "WHITE"
+non_british_males$ethnicity_grouped[non_british_males$ETHNICITY %in% black] <- "BLACK"
+non_british_males$ethnicity_grouped[non_british_males$ETHNICITY %in% mixed] <- "MIXED"
+non_british_males$ethnicity_grouped[non_british_males$ETHNICITY %in% asian] <- "ASIAN"
+non_british_males$ethnicity_grouped[non_british_males$ETHNICITY %in% other] <- "OTHER"
+non_british_males$ethnicity_grouped[non_british_males$ETHNICITY %in% notKnown] <- NA
+non_british_males$ethnicity_grouped[is.na(non_british_males$ETHNICITY)] <- NA
+```
+```{r}
+#-----------------------------------------------------------------------------
+# bar chart
+ggplot(data = subset(non_british_males,!is.na(non_british_males$ethnicity_grouped)), aes(x = ethnicity_grouped, fill=ethnicity_grouped)) + 
+  geom_bar()
+```
+We can explore within each group.
+
+```{r}
+white <- c("C ANY OTHER WHITE BACKGROUND", "WHITE BRITISH", "WHITE", "WHITE IRISH", "English")
+black <- c("BLACK AFRICAN", "BLACK CARIBBEAN", "P ANY OTHER BLACK BACKGROUND")
+mixed <- c("G ANY OTHER MIXED BACKGROUND", "MIXED WHITE AND BLACK AFRICAN", "MIXED WHITE AND ASIAN", "WHITE AND BLACK CARIBBEAN")
+asian <- c("ASIAN PAKISTANI", "ASIAN BANGLADESHI", "L ANY OTHER ASIAN BACKGROUND", "ASIAN INDIAN", "CHINESE")
+other <- c("8 OTHER", "S ANY OTHER ETHNIC GROUP")
+notKnown <- c("NOT STATED", "X NOT KNOWN")
+
+# breakdown of white ethnicity 
+
+p <-ggplot(subset(non_british_males, !is.na(non_british_males$ethnicity_grouped)), aes(x = ETHNICITY, fill=ETHNICITY)) + 
+  geom_bar() 
+
+p + facet_grid(cols = vars(ethnicity_grouped))
 
 ```
 
+
+## b. Explore the data to find an interesting or insightful aspect that you can then communicate visually. Be creative!
+
+```{r 2b}
+#=============================================================================
+# 2.b. Explore
+
+
+# a. Age at lung cancer diagnosis
+```
 
 _Data used artificial data from the Simulacrum, a synthetic dataset developed by Health Data Insight CiC derived from anonymous cancer data provided by the National Cancer Registration and Analysis Service, which is part of Public Health England_

@@ -439,7 +439,6 @@ ggplot(aes(x = ETHNICITY, fill=ETHNICITY)) +
 ```
 Asian indians make up most of the Asian category and black carribeans make up most of the black ethnic group. For thsoe that are mixed, other was the most prominent, followed by black and white caribbean.
 
-
 ## b. Explore the data to find an interesting or insightful aspect that you can then communicate visually. Be creative!
 
 
